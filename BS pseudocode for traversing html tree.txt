@@ -1,0 +1,13 @@
+# Pseudocode for traversing html tree
+# get all leaf nodes
+# if node is a leaf node (no children)
+#     recursively check its parents until the parent is equal to the root node.
+#     step down one level
+#     check for img, video, audio, iframe, embed, map tags
+#     if no other tags found, mark as text node
+#     if img, video, audio, iframe, embed, map tag found mark as that type
+#     traverse up tree until a <p>, <div> or <span>is found
+#     once a <p> is found, check if its parent is a <div class=image-container>, if so mark as Image()
+#     once a <div> is found, check if its parent is a <Figure class=caption>, if so process as Image() with caption
+#     once a <span> is found, check if its parent is a <span>
+#     otherwise, capture all descendant tags and process the node as its marked type (Text | Image | Video | Audio | Embed | Map | Button | Code | Table)
