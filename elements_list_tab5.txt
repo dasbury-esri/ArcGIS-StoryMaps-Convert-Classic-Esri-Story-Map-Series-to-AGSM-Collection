@@ -1,3 +1,0 @@
-[<p>The city of New Orleans divides itself into 13 planning districts and 72 neighborhood statistical areas.  Although Hurricane Katrina affected the entire city, areas such as Mid-City, New Orleans East, Gentilly, the Lower Ninth Ward, Bywater, and Lakeview endured the most intense damage. </p>,
-<p><span style="font-size:10px">Data Source: <a href="https://data.nola.gov/Geographic-Base-Layers/NOLA-Neighborhood-Statistical-Areas/ukvx-5dku" target="_blank">City of New Orleans GIS Department </a></span></p>
-]
