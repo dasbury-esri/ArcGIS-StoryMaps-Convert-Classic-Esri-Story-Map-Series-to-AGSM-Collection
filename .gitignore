@@ -58,3 +58,6 @@ coverage.xml
 
 # ArcGIS/Esri
 .arcgis-full/
+
+# Temp png images
+*.png
