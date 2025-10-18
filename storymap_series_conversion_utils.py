@@ -1307,7 +1307,7 @@ def build_collection(context):
             if draft_times and published_time and max(draft_times) > published_time:
                 print(f"WARNING: There is an issue with '{story.title}'. Click the link to open the story builder and check for errors --> https://storymaps.arcgis.com/stories/{story.itemid}/edit")
             if safe_get_json(item):
-                collection.add(item=story, title=story.title, thumbnail=thumbnail_paths[i])
+                collection.add(item=story, title=story.title, thumbnail=str(thumbnail_paths[i]))
             else:
                 print(f"There was a problem publishing '{story.title}'. Open the link {story.url} and try again.")
         except Exception as e:
@@ -1322,7 +1322,7 @@ def build_collection(context):
         collection.content[1].type = classic_story_type
     # Set the Collection thumbnail to be the same as the classic story
     classic_thumbnail_path = download_thumbnail(Item(gis=gis, itemid=context['classic_id']), default_thumbnail_path, context)
-    collection.content[1].media = Image(path=classic_thumbnail_path)
+    collection.content[1].media = Image(path=str(classic_thumbnail_path))
     # Publish
     published_collection = collection.save(title=collection_title, tags=["Classic Story Map to AGSM Conversion", "Story Map Series"], publish=True)
     context['collection_id'] = published_collection.id
