@@ -114,3 +114,176 @@ By:
 your notebook will remain stable within ArcGIS Online’s managed execution environment, while staying developer‑friendly inside VSCode.
 
 Following this approach preserves the structured, docstring‑rich, verbose-comment style you prefer, and guarantees smoother transitions between local debugging and production execution.
+
+
+The updated version of your code is overall well-improved—it has consistent docstrings, structured function order, and verbose comments—but there remains significant duplication and opportunities for efficiency gains, especially in error-handling, thumbnail generation, and conversion utilities. The cleanup can focus on consolidating common logic and modularizing repeated workflows.
+
+Below is a detailed evaluation:
+Core Duplication and Optimization Areas
+1. Safe Getter Functions (safe_get_json, safe_get_rest_json, safe_get_image)
+
+All three perform “try → request → fallback” patterns. You could merge them into a generic helper:
+
+python
+def safe_request(handler, *args, **kwargs):
+    """Generic safe wrapper for request or ArcGIS item methods."""
+    try:
+        return handler(*args, **kwargs)
+    except Exception:
+        return {} if "json" in handler.__name__ else None
+
+Then define specific shims:
+
+python
+safe_get_json = lambda item: safe_request(lambda: json.loads(item.get_data()) if isinstance(item.get_data(), str) else item.get_data())
+safe_get_rest_json = lambda url, params=None: safe_request(lambda: requests.get(url, params=params).json())
+safe_get_image = lambda url: safe_request(requests.get, url)
+
+That removes about 30 duplicated lines and centralizes fallback behavior.
+2. Thumbnail Creation and Download
+
+There are three near-identical functions:
+
+    download_thumbnail
+
+    create_image_thumbnail
+
+    create_webmap_thumbnail (partial)
+
+Unify into one generate_thumbnail() utility with a mode argument:
+
+python
+def generate_thumbnail(source, default_path, mode="image", gis=None, webmap_json=None):
+    """
+    Flexible helper for generating thumbnails.
+    mode options: 'image', 'webmap', 'item'
+    """
+    try:
+        if mode == "item" and gis:
+            url = f"{gis._portal.resturl}content/items/{source.id}/info/{source.thumbnail}"
+            response = requests.get(url, params={"token": gis._con.token})
+        elif mode == "image":
+            response = requests.get(source)
+        elif mode == "webmap":
+            image_url = call_print_service(webmap_json)
+            response = requests.get(image_url)
+        else:
+            raise ValueError("Unsupported mode.")
+
+        img = PILImage.open(BytesIO(response.content))
+        temp_path = BASE_DIR / f"thumbnail_{uuid.uuid4().hex}.png"
+        img.thumbnail((800, 600))
+        img.save(temp_path)
+        return str(temp_path)
+    except Exception:
+        return create_image_thumbnail(default_path, default_path)
+
+create_webmap_thumbnail() can then delegate this helper, simplifying retry logic.
+3. Redundant Conversion Logic in HTML Parsing
+
+Functions like convert_color_style_to_class, process_html_colors_preserve_html, and convert_element_to_storymap_object duplicate string cleaning, tag traversal, and style removal steps. Consolidate with:
+
+    A single color parsing utility (parse_color_to_class)
+
+    A shared “tag cleaner” function to strip inline styles across all rich-text tags.
+
+E.g.:
+
+python
+def apply_style_class(tag, property_name="color"):
+    style = tag.get("style", "")
+    match = re.search(fr"{property_name}\s*:\s*([^;]+)", style)
+    if not match:
+        return
+    val = match.group(1).strip()
+    class_color = f"sm-text-{property_name}-{color_to_hex(val)}"
+    del tag["style"]
+    tag["class"] = tag.get("class", []) + [class_color]
+
+Then both color-related functions call this.
+4. Repetition in Map/Extent Normalization Functions
+
+Currently, normalize_webmercator_extent, fetch_extent_from_item, fill_missing_extents, and parts of build_webmap_from_json all handle extent normalization with slightly different logic.
+
+You can consolidate everything into:
+
+    normalize_extent(extent, default_sr=102100)
+
+    infer_extent(entries, index)
+
+    convert_to_webmercator_if_needed(extent)
+
+and reuse these consistently.
+5. Mainstage and StoryMap Creation Loops
+
+create_and_save_storymaps() and build_and_save_storymap() have nested iteration and printing logic that can be simplified using the same output logger and loop control, e.g.:
+
+python
+for i, entry in enumerate(entries):
+    log_step(f"[{i+1}/{len(entries)}] Building: {entry.get('title', 'Untitled')}")
+    item, thumb = build_and_save_storymap(context, i)
+    context["published_storymap_items"][i] = item
+    context["thumbnail_paths"][i] = thumb
+
+Combine create_storymaps() and create_and_save_storymaps() into a single streamlined loop with programmable output verbosity.
+6. Folder and Item Management
+
+check_folder, create_folder, move_item_to_folder, and move_items_to_folder share similar print() and error handling logic.
+Suggested refactor: group all under a FolderManager class:
+
+python
+class FolderManager:
+    def __init__(self, gis, context):
+        self.gis = gis
+        self.context = context
+
+    def ensure_folder(self, name):
+        folders = [f.name for f in self.gis.content.folders.list(self.gis.users.me.username)]
+        if name not in folders:
+            self.gis.content.folders.create(folder=name, owner=self.gis.users.me.username)
+        return name
+
+    def move_items(self, items):
+        for item in items:
+            try:
+                item.move(self.context["folder_name"])
+                log_step(f"Moved {item.title}")
+            except Exception as e:
+                log_step(f"Move failed: {e}")
+
+This reduces UI-driven duplication while keeping behavior identical.
+7. Repeated print Messaging
+
+Multiple functions use print(f"Step #x complete...").
+Centralize with a log_step() helper (from your earlier pseudocode plan) or use a verbosity setting in context (context["verbose"] = True).
+8. Combine Redundant Exception Paths
+
+There are many except Exception: blocks printing similar diagnostics. Abstract it:
+
+python
+def safe_exec(msg, fn, *args, **kwargs):
+    try:
+        return fn(*args, **kwargs)
+    except Exception as e:
+        print(f"[{msg}] {e}")
+        return None
+
+All error-prone steps like gis.content.get(), item.move(), and thumbnail requests can use this.
+Quick Efficiency Wins
+
+    Replace long nested try/excepts with contextlib.suppress()
+
+    Cache frequently used values (e.g., context["gis"]._con.token) instead of recalculating per request.
+
+    Convert deeply nested if/else HTML parsing into lookup dictionaries for “type → builder”.
+
+Summary Table of Recommended Consolidations
+Category	Duplicate Functions	Proposed Unified Function	Savings
+JSON/Image getters	safe_get_json, safe_get_rest_json, safe_get_image	safe_request(handler)	~30 lines
+Thumbnails	download_thumbnail, create_image_thumbnail, parts of create_webmap_thumbnail	generate_thumbnail()	~80 lines
+HTML color processing	convert_color_style_to_class, process_html_colors_preserve_html	apply_style_class()	~40 lines
+Extent normalization	normalize_*, fetch_extent_*, fill_missing_*	normalize_extent()	~50 lines
+Folder management	check_folder, create_folder, move_item_to_folder, move_items_to_folder	FolderManager class	~60 lines
+Step/status output	repeated prints/logs	log_step(msg)	readability + maintainability
+
+Would you like a rewritten refactored code skeleton (e.g., reorganized 1,000-foot view of module layout showing the new combined functions and order)? That would make implementing these changes easier while preserving your verbose commenting style.
