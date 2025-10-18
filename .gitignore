@@ -61,3 +61,7 @@ coverage.xml
 
 # Temp png images
 *.png
+
+# Temp folders
+notebook_data/
+_local_testing/

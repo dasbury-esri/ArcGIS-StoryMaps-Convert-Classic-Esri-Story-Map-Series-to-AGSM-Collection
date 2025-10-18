@@ -5,6 +5,7 @@ from arcgis.apps.storymap import (
 
 import os
 import re
+import uuid
 import json
 import math
 import tempfile
@@ -12,10 +13,41 @@ import requests
 import traceback
 import ipywidgets as widgets
 from IPython.display import display
+from pathlib import Path
 from io import BytesIO
 from copy import deepcopy
 from PIL import Image as PILImage, ImageStat
 from bs4 import BeautifulSoup
+
+## Environments
+def detect_environment():
+    """
+    Prints the current running environment and returns a string identifier.
+    """
+    import os
+    # VS Code
+    if os.environ.get("VSCODE_PID"):
+        DEV_ENV = os.environ.get("VSCODE_PID") is not None
+        return "vscode", "VSCode Notebook environment"
+    # Jupyter Lab
+    if os.environ.get("JPY_PARENT_PID"):
+        return "jupyterlab", "Jupyter Lab Notebook environment"
+    # ArcGIS Online Notebooks
+    if "arcgis" in os.environ.get("JUPYTER_IMAGE_SPEC", "") or "arcgis" in os.environ.get("CONDA_DEFAULT_ENV", ""):
+        return "arcgisnotebook", "ArcGIS Notebook environment"
+    # Classic Jupyter Notebook
+    return "classicjupyter", "classic Jupyter environment"
+
+current_env, env_string = detect_environment()
+
+# Define base directory to store notebook data
+# write all temporary or exported files under BASE_DIR / "notebook_data"
+BASE_DIR = Path.home() / "notebook_data"
+# When debugging locally, allow development overrides:
+if current_env == "vscode":
+    BASE_DIR = Path.cwd() / "_local_testing"
+# Ensure the directory exists
+BASE_DIR.mkdir(parents=True, exist_ok=True)
 
 ## Prevent exception errors
 def safe_get_json(item):
@@ -78,7 +110,7 @@ def initialize_ui(widget_type="text", description="", placeholder="", width="200
     else:
         raise ValueError("Unsupported widget_type")
 
-## Fetch and parse story data
+## Fetch and parse
 def fetch_story_data(button, output2, input2, context):
     """
     Fetch the classic StoryMap data and display status in the output widget.
@@ -580,17 +612,17 @@ def download_thumbnail(webmap_item, default_thumbnail_path, context):
         params = {'token': token} if token else {}
         response = safe_get_rest_json(url, params=params)
         img = PILImage.open(BytesIO(response.content))
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
-        img.save(temp_file.name)
-        return temp_file.name
+        temp_file_path = BASE_DIR / f"thumbnail_{uuid.uuid4().hex}.png"
+        img.save(temp_file_path)
+        return str(temp_file_path)
     except Exception:
         print("Thumbnail download failed; using default.")
         url = default_thumbnail_path
         response = requests.get(url)
         img = PILImage.open(BytesIO(response.content))
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
-        img.save(temp_file.name)
-        return temp_file.name
+        temp_file_path = BASE_DIR / f"thumbnail_{uuid.uuid4().hex}.png"
+        img.save(temp_file_path)
+        return str(temp_file_path)
 
 def create_image_thumbnail(image_url, default_thumbnail_path):
     """
@@ -599,16 +631,16 @@ def create_image_thumbnail(image_url, default_thumbnail_path):
     try:
         response = safe_get_image(image_url)
         img = PILImage.open(BytesIO(response.content))
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
+        temp_file_path = BASE_DIR / f"thumbnail_{uuid.uuid4().hex}.png"
         img.thumbnail((800, 600))
-        img.save(temp_file.name)
-        return temp_file.name
+        img.save(temp_file_path)
+        return str(temp_file_path)
     except Exception:
         img = PILImage.open(BytesIO(safe_get_image(default_thumbnail_path).content))
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
+        temp_file_path = BASE_DIR / f"thumbnail_{uuid.uuid4().hex}.png"
         img.thumbnail((800, 600))
-        img.save(temp_file.name)
-        return temp_file.name
+        img.save(temp_file_path)
+        return str(temp_file_path)
 
 def is_blank_image(image_path, threshold=5):
     """
@@ -686,11 +718,11 @@ def create_webmap_thumbnail(webmap_json, default_thumbnail_path):
             image_url = result['results'][0]['value']['url']
             img_response = safe_get_image(image_url)
             if img_response.status_code == 200:
-                temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
-                temp_file.write(img_response.content)
-                temp_file.close()
-                img = PILImage.open(temp_file.name)
-                is_blank = is_blank_image(temp_file.name)
+                temp_file_path = BASE_DIR / f"thumbnail_{uuid.uuid4().hex}.png"
+                with open(temp_file_path, "wb") as f:
+                    f.write(img_response.content)
+                img = PILImage.open(temp_file_path)
+                is_blank = is_blank_image(temp_file_path)
                 if is_blank:
                     print("Generated thumbnail is blank") #; scaling extent and retrying.")
                     # Try to scale the extent if possible
@@ -703,9 +735,9 @@ def create_webmap_thumbnail(webmap_json, default_thumbnail_path):
                     # else:
                     if not extent:
                         print("No extent found to scale; using default image.")
-                        temp_file.name = create_image_thumbnail(image_url=default_thumbnail_path, default_thumbnail_path=default_thumbnail_path)
-                        return temp_file.name, webmap_json # , print_service_response
-                return temp_file.name, webmap_json # , print_service_response
+                        temp_file_path = create_image_thumbnail(image_url=default_thumbnail_path, default_thumbnail_path=default_thumbnail_path)
+                        return temp_file_path, webmap_json # , print_service_response
+                return temp_file_path, webmap_json # , print_service_response
             else:
                 break  # No valid image, break and use default
 
@@ -726,8 +758,8 @@ def create_webmap_thumbnail(webmap_json, default_thumbnail_path):
 
     # If we reach here, fallback to the default thumbnail
     print("Thumbnail download failed; using default.")
-    temp_file.name = create_image_thumbnail(image_url=default_thumbnail_path, default_thumbnail_path=default_thumbnail_path)
-    return temp_file.name, webmap_json # , print_service_response
+    temp_file_path = create_image_thumbnail(image_url=default_thumbnail_path, default_thumbnail_path=default_thumbnail_path)
+    return temp_file_path, webmap_json # , print_service_response
 
 def remove_failed_service(webmap_json, failed_url):
     """
@@ -1293,6 +1325,7 @@ def build_collection(context):
     collection.content[1].media = Image(path=classic_thumbnail_path)
     # Publish
     published_collection = collection.save(title=collection_title, tags=["Classic Story Map to AGSM Conversion", "Story Map Series"], publish=True)
+    context['collection_id'] = published_collection.id
     return collection_title, collection._url
 
 def create_collection(button, output6, context):
@@ -1302,8 +1335,8 @@ def create_collection(button, output6, context):
     with output6:
         output6.clear_output()
         print(f"Creating Collection '{context['classic_story_title']}'...")
-        collection_title, collection_url = build_collection(context)
-        print(f"Collection staged: '{collection_title}' {collection_url} \nClick the link to open the Collection builder. Make any desired edits and then complete the publication of your converted StoryMap.")
+        context['collection_title'], context['collection_url'] = build_collection(context)
+        print(f"Collection staged: '{context['collection_title']}' {context['collection_url']} \nClick the link to open the Collection builder. Make any desired edits and then complete the publication of your converted StoryMap.")
         print("\nStep #6 complete. Once you've published the Collection, click the Markdown text below and then click the 'Play' button twice to proceed.")
 
 ## Content management
@@ -1314,12 +1347,14 @@ def check_folder(button, input7, output7, btn7_1, context):
     gis = context['gis']
     classic_story_title = context['classic_story_title']
     with output7:
+        print("Checking...")
         output7.clear_output()
         if not classic_story_title:
             print("No classic StoryMap title found. Extract the story settings first.")
             return
         folder_name = "Collection-" + classic_story_title if classic_story_title else "Collection-Conversion"
         input7.value = folder_name
+        context["folder_name"] = folder_name
         user_line7 = widgets.HBox([widgets.Label(value="Edit the folder name if desired -->"), input7])
         # Check if folder exists
         user = gis.users.me
@@ -1331,15 +1366,16 @@ def check_folder(button, input7, output7, btn7_1, context):
         else:
             display(widgets.VBox([user_line7, btn7_1]))
 
-def create_folder(button, context):
+def create_folder(button, input7, output7, context):
     """
     Create a new folder in the user's ArcGIS Online content.
     """    
-    global folder_name, output7, input_param7
     gis = context['gis']
+    folder_name = context['folder_name']
     with output7:
         output7.clear_output()
-        folder_name = input_param7.value.strip() if input_param7.value.strip() else folder_name
+        folder_name = input7.value.strip() if input7.value.strip() else folder_name
+        context['folder_name'] = folder_name
         try:
             gis.content.folders.create(folder=folder_name, owner=gis.users.me.username)
             print(f"Created folder '{folder_name}' to save entries and Collection.")
@@ -1357,3 +1393,45 @@ def move_item_to_folder(gis, item, folder_name):
             print(f"Moved item '{item.title}' (ID: {item.itemid}) to folder '{folder_name}'.")
     except Exception as e:
         print(f"Error moving item '{item.title}' (ID: {item.itemid}): {e}")
+
+def move_items_to_folder(button, output8, context):
+    """
+    Moves a list of ArcGIS Online items into a specified folder.
+    """
+    gis = context['gis']
+    folder_name = context['folder_name']
+    classic_item = context['classic_item']
+    published_storymap_items = context['published_storymap_items']
+    collection_title = context['collection_title']
+    collection_id = context['collection_id']
+    with output8:
+        output8.clear_output()
+        if folder_name is None:
+            print("No folder name found. Check for or create a folder first.")
+            return
+        if classic_item is None:
+            print("No classic StoryMap item found. Fetch the story data first.")
+            return
+        if published_storymap_items is None or len(published_storymap_items) == 0:
+            print("No published StoryMap items found. Create the StoryMaps first.")
+            return
+        if collection_title is None:
+            print("No collection found. Create the collection first.")
+            return
+        print(f"Moving items to folder '{folder_name}'...")
+        move_item_to_folder(gis, classic_item, folder_name)
+        for story_item in published_storymap_items:
+            if story_item:
+                move_item_to_folder(gis, story_item, folder_name)
+        # Move the collection item
+        try:
+            #collection_search = gis.content.search(query=f'title:"{collection_title}" AND owner:{gis.users.me.username}', item_type="Collection", max_items=1)
+            if collection_id:
+                collection_item = gis.content.get(collection_id)
+                move_item_to_folder(gis, collection_item, folder_name)
+                print(f"Moved collection '{collection_title}' to folder '{folder_name}'.")
+            else:
+                print(f"Could not find the collection item '{collection_title}' to move.")
+        except Exception as e:
+            print(f"Error moving collection item: {e}")
+        print("\nStep #8 complete. Conversion complete!")
