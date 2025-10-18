@@ -1240,7 +1240,7 @@ def build_and_save_storymap(context, entry_index):
     story.save(title=entry_title, tags=["Classic Story Map to AGSM Conversion", "Story Map Series"], publish=True)
     if hasattr(story, '_item'):
         published_story_item = story._item
-        published_story_item.update(thumbnail=thumbnail_path)
+        published_story_item.update(thumbnail=str(thumbnail_path))
         published_story_item_url = "https://storymaps.arcgis.com/stories/" + published_story_item.id
         print(f"{published_story_item_url} '{entry_title}' is staged for publishing. Click the link to complete.")
         return published_story_item, thumbnail_path
