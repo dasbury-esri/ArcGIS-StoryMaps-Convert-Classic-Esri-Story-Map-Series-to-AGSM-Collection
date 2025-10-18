@@ -1,0 +1,116 @@
+Environment‑Aware Best Practices
+1. Dependency Control
+
+ArcGIS Online uses a managed environment with pinned dependency versions.
+
+    Avoid importing any external packages not preinstalled in AGO, and wrap optional imports:
+
+python
+try:
+    from PIL import Image
+except ImportError:
+    Image = None
+
+If development in VSCode requires additional debugging or visualization libraries (like rich, tqdm, or logging), isolate them behind environment checks:
+
+    python
+    import os
+    DEV_ENV = os.environ.get("VSCODE_PID") is not None
+
+    if DEV_ENV:
+        print("Running in VSCode notebook environment")
+
+2. Path and File Handling
+
+ARC Online notebooks often have sandboxed storage limited to /arcgis/home/.
+
+    Use
+
+python
+from pathlib import Path
+BASE_DIR = Path.home()
+
+and write all temporary or exported files under BASE_DIR / "notebook_data".
+
+When debugging locally, allow development overrides:
+
+    python
+    if DEV_ENV:
+        BASE_DIR = Path(__file__).parent / "_local_testing"
+
+3. Authentication Separation
+
+Avoid persistent login logic that depends on saved credentials.
+
+    Let GIS("home") handle credentials on AGO.
+
+    During VSCode development, fall back to developer credentials in AGOL_TEST_USER and AGOL_TEST_PW environment variables.
+
+    Abstract this with:
+
+    python
+    def connect_gis():
+        """
+        Returns an authenticated GIS connection depending on environment.
+        """
+        if DEV_ENV:
+            return GIS("https://www.arcgis.com", os.environ["AGOL_TEST_USER"], os.environ["AGOL_TEST_PW"])
+        return GIS("home")
+
+4. Debugging Tools
+
+AGO’s notebook kernel prints errors minimally and hides full stack traces at times.
+
+    In production cells, wrap operations in try/except with clear output strings that print traceback.format_exc() only if DEV_ENV is True.
+
+    Keep verbose logging via your custom log_step() helper, but ensure messages are short enough not to flood the AGO output pane.
+
+5. Output Controls
+
+In AGO, ipywidgets and rich interactive UIs can sometimes fail to render fully.
+
+    Retain widget-based interfaces for usability, but gate their creation:
+
+    python
+    if not DEV_ENV:
+        display(widgets.VBox([...]))
+
+    Add a simple command-line fallback for automation (e.g., flags or JSON-driven inputs).
+
+6. File Organization
+
+You can safely separate reusable code into a lightweight helper script such as storymap_utils.py, placed beside your notebook.
+
+    In AGO, this will still import successfully as long as you upload it with the notebook.
+
+    In VSCode, you gain the ability to test these functions directly and use standard debugging tools.
+
+7. Memory and Performance
+
+AGO notebooks have limited memory (currently ~9 GB RAM).
+
+    Any large loops over StoryMap entries should include incremental saves or explicit gc.collect() calls to prevent kernel failures.
+
+    Prefer smaller function scopes within with blocks to auto-close items and releases (e.g., with open(...) as f:).
+
+Recommended Adjustments to the Refactor Plan
+Category	    |   Adjustment
+Logging     	|   Replace print calls with an environment‑sensitive log_step() that limits verbosity online.
+Error Handling	|   Centralize try/except in a helper (e.g., safe_api_call(fn, *args)), printing full trace only in VSCode.
+UI	            |   Keep interactive widgets but suppress layout logic in headless or automated AGO runs.
+Testing     	|   Write small “unit test” cells in VSCode using mock GIS or JSON data to isolate functions.
+Imports	        |   Group Esri imports (from arcgis.gis import GIS, etc.) at the top with comments on AGO availability.
+
+Summary
+
+By:
+
+    Switching logging and optional import behavior based on environment,
+
+    Using dynamic authentication and file paths,
+
+    Keeping verbose documentation but simplifying UI dependencies,
+
+your notebook will remain stable within ArcGIS Online’s managed execution environment, while staying developer‑friendly inside VSCode.
+
+Following this approach preserves the structured, docstring‑rich, verbose-comment style you prefer, and guarantees smoother transitions between local debugging and production execution.
