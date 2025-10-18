@@ -1229,7 +1229,7 @@ def build_and_save_storymap(context, entry_index):
     cover_properties.date = "none"
     if not thumbnail_path or not os.path.isfile(thumbnail_path):
         thumbnail_path = default_thumbnail_path
-    cover_properties.media = Image(thumbnail_path) 
+    cover_properties.media = Image(str(thumbnail_path))
 
     # Hide cover. Since the StoryMap cover has no property to hide it, we hide the node using JSON properties
     for k, v in story.properties['nodes'].items():
