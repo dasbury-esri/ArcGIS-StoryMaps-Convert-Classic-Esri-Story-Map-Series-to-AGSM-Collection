@@ -1,25 +1,34 @@
-from arcgis.gis import GIS, Item
-from arcgis.apps.storymap import (
-    StoryMap, Themes, Image, Video, Audio, Embed, Map, Text, Sidecar, TextStyles, Collection
-)
+"""
+storymap_series_conversion_utils.py
+Utilities to convert Classic Esri Story Map Series applications
+into ArcGIS StoryMap Collections, compatible with ArcGIS Online Notebooks.
 
-import os
-import re
-import uuid
-import json
-import math
-import tempfile
-import requests
-import traceback
+Dependencies:
+  - arcgis.gis, arcgis.apps.storymap
+  - requests, bs4, PIL, ipywidgets
+"""
+
+# ======================================================================
+# Imports and Constants
+# ======================================================================
+
+from arcgis.gis import GIS, Item
+from arcgis.apps.storymap import Themes, Text, TextStyles, Embed, Sidecar, Image, Video, Audio, Map
+from arcgis.apps.storymap import *
+
+import os, re, uuid, json, math, tempfile, requests, traceback
 import ipywidgets as widgets
-from IPython.display import display
+from IPython.display import display, HTML
 from pathlib import Path
 from io import BytesIO
 from copy import deepcopy
 from PIL import Image as PILImage, ImageStat
 from bs4 import BeautifulSoup
 
-## Environments
+# ======================================================================
+# Environment and Paths
+# ======================================================================
+
 def detect_environment():
     """
     Prints the current running environment and returns a string identifier.
@@ -29,27 +38,83 @@ def detect_environment():
     if os.environ.get("VSCODE_PID"):
         DEV_ENV = os.environ.get("VSCODE_PID") is not None
         return "vscode", "VSCode Notebook environment"
+    # ArcGIS Online Notebooks
+    if "arcgis" in os.environ.get("NB_USER", ""):
+        return "arcgisnotebook", "ArcGIS Notebook environment"
     # Jupyter Lab
     if os.environ.get("JPY_PARENT_PID"):
         return "jupyterlab", "Jupyter Lab Notebook environment"
-    # ArcGIS Online Notebooks
-    if "arcgis" in os.environ.get("JUPYTER_IMAGE_SPEC", "") or "arcgis" in os.environ.get("CONDA_DEFAULT_ENV", ""):
-        return "arcgisnotebook", "ArcGIS Notebook environment"
     # Classic Jupyter Notebook
     return "classicjupyter", "classic Jupyter environment"
 
 current_env, env_string = detect_environment()
 
 # Define base directory to store notebook data
-# write all temporary or exported files under BASE_DIR / "notebook_data"
-BASE_DIR = Path.home() / "notebook_data"
-# When debugging locally, allow development overrides:
+BASE_DIR = Path.home() / "conversion_data"
+# When debugging locally, 
 if current_env == "vscode":
     BASE_DIR = Path.cwd() / "_local_testing"
 # Ensure the directory exists
 BASE_DIR.mkdir(parents=True, exist_ok=True)
 
-## Prevent exception errors
+# ======================================================================
+# Authentification for different environments
+# ======================================================================
+
+def authenticate_gis(context, portal_url="https://www.arcgis.com", client_id=None):
+    """
+    Authenticate to ArcGIS Online or Enterprise. Falls back to username/password
+    """
+    import ipywidgets as widgets
+    from IPython.display import display
+    from arcgis.gis import GIS
+
+    def finish_auth(gis):
+        context["gis"] = gis
+        print(f"Authenticated as: {context['gis'].properties.user.username} (role: {context['gis'].properties.user.role} / userType: {context['gis'].properties.user.userLicenseTypeId}")
+
+    # Try ArcGIS Notebook profile
+    if current_env == "arcgisnotebook":
+        try:
+            gis = GIS("home")
+            finish_auth(gis)
+            return
+        except Exception:
+            pass
+
+    # Try OAuth if client_id provided
+    if client_id:
+        try:
+            gis = GIS(portal_url, client_id=client_id, authorize=True)
+            finish_auth(gis)
+            return
+        except Exception:
+            pass
+
+    # Fallback to username/password widgets
+    username_widget = widgets.Text(description="Username:")
+    password_widget = widgets.Password(description="Password:")
+    login_button = widgets.Button(description="Login")
+    output = widgets.Output()
+
+    def handle_login(button):
+        with output:
+            output.clear_output()
+            print("Logging in...")
+            try:
+                gis = GIS(portal_url, username_widget.value, password_widget.value)
+                finish_auth(gis)
+                print("\nStep #1 complete. Click the Markdown text below and then click the 'Play' button twice to proceed.")
+            except Exception as e:
+                print(f"Login failed: {e}")
+
+    login_button.on_click(handle_login)
+    display(widgets.VBox([username_widget, password_widget, login_button, output]))
+
+# ======================================================================
+# Generic Utility Functions to Prevent Exception Errors
+# ======================================================================
+
 def safe_get_json(item):
     """
     Safely get JSON data from an ArcGIS Item, returning {} if missing or corrupt.
@@ -84,7 +149,10 @@ def safe_get_image(url):
     except Exception:
         return None
 
-## ipywidgets config
+# ======================================================================
+# ipywidgets Config
+# ======================================================================
+
 def initialize_ui(widget_type="text", description="", placeholder="", width="200px", height="40px", value=None, layout=None, elements=None):
     """
     Utility to create and return common ipywidgets for UI setup.
@@ -110,8 +178,11 @@ def initialize_ui(widget_type="text", description="", placeholder="", width="200
     else:
         raise ValueError("Unsupported widget_type")
 
-## Fetch and parse
-def fetch_story_data(button, output2, input2, context):
+# ======================================================================
+# StoryMap Data Extraction and Theme Mapping
+# ======================================================================
+
+def fetch_story_data_btn(button, output2, input2, context):
     """
     Fetch the classic StoryMap data and display status in the output widget.
     """
@@ -159,9 +230,7 @@ def fetch_classic_storymap_data(classic_storymap_id, context):
     return context['classic_item'], context['classic_item_data']
 
 def normalize_classic_title(classic_string):
-    """
-    Remove leading/trailing whitespace from the classic story's title.
-    """
+    """Remove leading/trailing whitespace from the classic story's title."""
     return classic_string.strip()
 
 def extract_story_settings(context):
@@ -197,7 +266,7 @@ def extract_story_settings(context):
         context['entries'] = []
     return context
 
-def extract_and_display_settings(button, output3, context):
+def extract_and_display_settings_btn(button, output3, context):
     """
     Extract and display settings, theme, and entries from the classic StoryMap data.
     """
@@ -232,19 +301,7 @@ def extract_and_display_settings(button, output3, context):
         print("\nStep #3 complete. Click the Markdown text below and then click the 'Play' button twice to proceed.")
 
 def determine_theme(theme):
-    """
-    Configure the new theme based on the classic theme.
-
-    Parameters
-    ----------
-    theme : dict
-        Classic theme dictionary.
-
-    Returns
-    -------
-    tuple
-        (classic_name, new_theme)
-    """
+    """Configure the new theme based on the classic theme."""
     classic_name = theme["colors"].get("name", "No classic theme name")
     group = theme["colors"]["group"]
     if group == "dark":
@@ -254,19 +311,10 @@ def determine_theme(theme):
     else:
         return classic_name, Themes.SUMMIT
 
+# ======================================================================
+# Main Stage (i.e. Media panel) Conversion
+# ======================================================================
 
-def process_entries(button, output4, context):
-    """
-    Process all entries in the classic StoryMap and display status.
-    """
-    with output4:
-        output4.clear_output()
-        print(f"Processing {len(context['entries'])} entries...")
-        fill_missing_extents(context['entries'], context['classic_item_data']['values']['settings'])
-        process_all_mainstages(context)
-        print("\nStep #4 complete. Click the Markdown text below and then click the 'Play' button twice to proceed.")
-
-## Main stage (i.e. Media panel) conversion
 def convert_mainstage(entry):
     """
     Converts a single classic Story Map media panel into an AGSM object.
@@ -346,7 +394,21 @@ def process_all_mainstages(context):
         else:
             print(f"[{i+1} of {len(context['entries'])}]: {context['entry_titles'][i]:35} Media type: {type(context['main_stage_contents'][i]).__name__}")
 
-## Sidepanel conversion
+def process_entries_btn(button, output4, context):
+    """
+    Process all entries in the classic StoryMap and display status.
+    """
+    with output4:
+        output4.clear_output()
+        print(f"Processing {len(context['entries'])} entries...")
+        fill_missing_extents(context['entries'], context['classic_item_data']['values']['settings'])
+        process_all_mainstages(context)
+        print("\nStep #4 complete. Click the Markdown text below and then click the 'Play' button twice to proceed.")
+
+# ======================================================================
+# HTML manipulation and Sidecar Conversion
+# ======================================================================
+
 def color_to_hex(color_value):
     """
     Convert a color value (hex, rgb, or named color) to a hex string without the leading '#'.
@@ -510,19 +572,7 @@ def convert_element_to_storymap_object(el):
         return Text(text=processed_html, style=TextStyles.PARAGRAPH)
 
 def parse_root_elements(html_snippet):
-    """
-    Parse an HTML snippet with BeautifulSoup and return a list of meaningful root-level elements.
-
-    Parameters
-    ----------
-    html_snippet : str
-        HTML snippet to parse.
-
-    Returns
-    -------
-    list
-        List of meaningful BeautifulSoup elements.
-    """
+    """Parse an HTML snippet with BeautifulSoup and return a list of meaningful root-level elements."""
     soup = BeautifulSoup(html_snippet, "html.parser")
     html_elements = []
     for child in soup.contents:
@@ -599,7 +649,10 @@ def convert_html_elements_to_storymap_node(html_elements):
             content_nodes.append(node)
     return content_nodes, image_metadata
 
-## Thumbnail utils
+# ======================================================================
+# Thumbnail utils
+# ======================================================================
+
 def download_thumbnail(webmap_item, default_thumbnail_path, context):
     """
     Download thumbnail from an ArcGIS Online Item to a local temp file and return the local path.
@@ -743,15 +796,18 @@ def create_webmap_thumbnail(webmap_json, default_thumbnail_path):
 
         elif 'error' in result and 'details' in result['error']:
             # Try to extract the failed service URL
-            failed_layer_detail = result['error']['details'][0]
-            if ' at ' in failed_layer_detail:
-                failed_service_url = failed_layer_detail.split(' at ')[-1]
-                if failed_service_url in tried_urls:
-                    break  # Prevent infinite loop if same URL keeps failing
+            details_list = result['error']['details']
+            if details_list and len(details_list) > 0:
+                failed_layer_detail = details_list[0]
+                if ' at ' in failed_layer_detail:
+                    failed_service_url = failed_layer_detail.split(' at ')[-1]
+                    if failed_service_url in tried_urls:
+                        break  # Prevent infinite loop if same URL keeps failing
                 tried_urls.add(failed_service_url)
                 webmap_json_copy = remove_failed_service(webmap_json_copy, failed_service_url)
                 continue  # Try again with the updated JSON
             else:
+                print("No details available in error response.")
                 break  # Can't parse the failed URL, break and use default
         else:
             break  # No results and no error details, break and use default
@@ -1098,34 +1154,9 @@ def wgs84_to_webmercator(x, y):
     my = math.log(math.tan((90 + y) * math.pi / 360.0)) * origin_shift / math.pi
     return mx, my
 
-## AGSM Creation utils
-def create_and_save_storymaps(context):
-    """
-    Loop to create and save StoryMaps from a list
-
-    Parameters
-    ----------
-    entries : list
-        List of entry dictionaries.
-
-    Returns
-    -------
-    None
-    """
-    entries = context['entries']
-
-    # Initialize context lists
-    context['published_storymap_items'] = [None] * len(entries)
-    context['thumbnail_paths'] = [None] * len(entries)
-
-    print("\n***NOTICE*** You MUST click each link below to open the story in a browser tab. ***NOTICE***\n***NOTICE*** Check for errors, edit and continue publishing if necessary.       ***NOTICE***\n\nIf you see an error message -- before troubleshooting further -- try just clicking the 'Publish' button. Doing so can fix many common issues.\n")
-
-    for i in range (len(entries)): # , entry in enumerate(entries):
-        print(f"[{i+1} of {len(context['entries'])}]... ",end="")
-        published_storymap_item, thumbnail_path = build_and_save_storymap(context, i)
-        if published_storymap_item:
-            context['published_storymap_items'][i] = published_storymap_item
-        context['thumbnail_paths'][i] = thumbnail_path
+# ======================================================================
+# StoryMap and Collection Assembly
+# ======================================================================
 
 def build_and_save_storymap(context, entry_index):
     """
@@ -1242,13 +1273,31 @@ def build_and_save_storymap(context, entry_index):
         published_story_item = story._item
         published_story_item.update(thumbnail=str(thumbnail_path))
         published_story_item_url = "https://storymaps.arcgis.com/stories/" + published_story_item.id
-        print(f"{published_story_item_url} '{entry_title}' is staged for publishing. Click the link to complete.")
+        display(HTML(f'<a href="{published_story_item_url}" target="_blank">{entry_title}</a> is staged for publishing. Click the link to complete.'))
         return published_story_item, thumbnail_path
     else:
         print("Could not find item for story:", story.title)
         return published_story_item, thumbnail_path
 
-def create_storymaps(button, output5, context):
+def create_and_save_storymaps(context):
+    """Loop to create and save StoryMaps from a list"""
+    entries = context['entries']
+
+    # Initialize context lists
+    context['published_storymap_items'] = [None] * len(entries)
+    context['thumbnail_paths'] = [None] * len(entries)
+
+    print("\n***NOTICE*** You MUST click each link below to open the story in a browser tab. ***NOTICE***\n***NOTICE*** Check for errors, edit and continue publishing if necessary.       ***NOTICE***\n\nIf you see an error message -- before troubleshooting further -- try just clicking the 'Publish' button. Doing so can fix many common issues.\n")
+
+    for i in range (len(context['entries'])): # , entry in enumerate(entries):
+        print(f"Converting [{i+1} of {len(context['entries'])}]... ",end="")
+        # display(HTML(f'Converting [{i+1} of {len(context["entries"])}]... <a href="{published_story_item_url}" target="_blank">{entry_title}</a> is staged for publishing. Click the link to complete.'))
+        published_storymap_item, thumbnail_path = build_and_save_storymap(context, i)
+        if published_storymap_item:
+            context['published_storymap_items'][i] = published_storymap_item
+        context['thumbnail_paths'][i] = thumbnail_path
+
+def create_storymaps_btn(button, output5, context):
     """
     Create and save StoryMaps for each entry and display status.
     """
@@ -1261,19 +1310,6 @@ def create_storymaps(button, output5, context):
 def build_collection(context):
     """
     Build a StoryMap Collection from published StoryMaps.
-
-    Parameters
-    ----------
-    classic_item : arcgis.gis.Item
-        The original classic StoryMap item.
-    published_storymap_items : list
-        List of published StoryMap items.
-    thumbnail_paths : list
-        List of thumbnail paths for each StoryMap.
-    classic_story_type : str
-        The type of the classic StoryMap.
-    new_theme : Themes
-        The new StoryMap theme.
 
     Returns
     -------
@@ -1328,7 +1364,7 @@ def build_collection(context):
     context['collection_id'] = published_collection.id
     return collection_title, collection._url
 
-def create_collection(button, output6, context):
+def create_collection_btn(button, output6, context):
     """
     Create a StoryMap Collection from published StoryMaps and display status.
     """
@@ -1336,19 +1372,26 @@ def create_collection(button, output6, context):
         output6.clear_output()
         print(f"Creating Collection '{context['classic_story_title']}'...")
         context['collection_title'], context['collection_url'] = build_collection(context)
-        print(f"Collection staged: '{context['collection_title']}' {context['collection_url']} \nClick the link to open the Collection builder. Make any desired edits and then complete the publication of your converted StoryMap.")
+        display(HTML(f'Collection staged: <a href="{context["collection_url"]}" target="_blank">{context["collection_title"]}</a>.'))
+        # print(f"Collection staged: '{context['collection_title']}' {context['collection_url']} 
+        print(f"Click the link to open the Collection builder. Make any desired edits and then complete the publication of your converted StoryMap.")
         print("\nStep #6 complete. Once you've published the Collection, click the Markdown text below and then click the 'Play' button twice to proceed.")
 
-## Content management
-def check_folder(button, input7, output7, btn7_1, context):
+# ======================================================================
+# Content Management
+# ======================================================================
+
+def check_folder_btn(button, input7, output7, btn7_1, context):
     """
     Check if the output folder exists and prompt user to create it if not.
     """    
     gis = context['gis']
     classic_story_title = context['classic_story_title']
+    output7.clear_output()
+    output7.append_stdout("Checking...\n") 
     with output7:
-        print("Checking...")
-        output7.clear_output()
+        # output7.clear_output()
+        # print("Checking...")
         if not classic_story_title:
             print("No classic StoryMap title found. Extract the story settings first.")
             return
@@ -1366,7 +1409,7 @@ def check_folder(button, input7, output7, btn7_1, context):
         else:
             display(widgets.VBox([user_line7, btn7_1]))
 
-def create_folder(button, input7, output7, context):
+def create_folder_btn(button, input7, output7, context):
     """
     Create a new folder in the user's ArcGIS Online content.
     """    
@@ -1392,9 +1435,12 @@ def move_item_to_folder(gis, item, folder_name):
             item.move(folder_name)
             print(f"Moved item '{item.title}' (ID: {item.itemid}) to folder '{folder_name}'.")
     except Exception as e:
-        print(f"Error moving item '{item.title}' (ID: {item.itemid}): {e}")
+        if "Item already exists" in str(e):
+            print(f"Item '{item.title}' (ID: {item.itemid}) already exists in target folder")
+        else:
+            print(f"Error moving item '{item.title}' (ID: {item.itemid}): {e}")
 
-def move_items_to_folder(button, output8, context):
+def move_items_to_folder_btn(button, output8, context):
     """
     Moves a list of ArcGIS Online items into a specified folder.
     """
@@ -1419,7 +1465,7 @@ def move_items_to_folder(button, output8, context):
             print("No collection found. Create the collection first.")
             return
         print(f"Moving items to folder '{folder_name}'...")
-        move_item_to_folder(gis, classic_item, folder_name)
+        # Move the new stories
         for story_item in published_storymap_items:
             if story_item:
                 move_item_to_folder(gis, story_item, folder_name)
@@ -1429,7 +1475,7 @@ def move_items_to_folder(button, output8, context):
             if collection_id:
                 collection_item = gis.content.get(collection_id)
                 move_item_to_folder(gis, collection_item, folder_name)
-                print(f"Moved collection '{collection_title}' to folder '{folder_name}'.")
+                # print(f"Moved collection '{collection_title}' to folder '{folder_name}'.")
             else:
                 print(f"Could not find the collection item '{collection_title}' to move.")
         except Exception as e:

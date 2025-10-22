@@ -65,3 +65,11 @@ coverage.xml
 # Temp folders
 notebook_data/
 _local_testing/
+
+# Old files
+Copilot Generated Notebook - Create ArcGIS StoryMap via Python with Context Dict.ipynb
+Copilot Generated Notebook - Create ArcGIS StoryMap via Python.ipynb
+Create ArcGIS StoryMap via Python module_old.ipynb
+Create ArcGIS StoryMap via Python module_via_AGONotebook_only.ipynb
+Create ArcGIS StoryMap via Python module_via_AGONotebook.ipynb
+Create ArcGIS StoryMap via Python module.ipynb

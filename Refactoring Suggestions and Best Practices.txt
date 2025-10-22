@@ -278,12 +278,12 @@ Quick Efficiency Wins
     Convert deeply nested if/else HTML parsing into lookup dictionaries for “type → builder”.
 
 Summary Table of Recommended Consolidations
-Category	Duplicate Functions	Proposed Unified Function	Savings
-JSON/Image getters	safe_get_json, safe_get_rest_json, safe_get_image	safe_request(handler)	~30 lines
-Thumbnails	download_thumbnail, create_image_thumbnail, parts of create_webmap_thumbnail	generate_thumbnail()	~80 lines
-HTML color processing	convert_color_style_to_class, process_html_colors_preserve_html	apply_style_class()	~40 lines
-Extent normalization	normalize_*, fetch_extent_*, fill_missing_*	normalize_extent()	~50 lines
-Folder management	check_folder, create_folder, move_item_to_folder, move_items_to_folder	FolderManager class	~60 lines
-Step/status output	repeated prints/logs	log_step(msg)	readability + maintainability
+Category	            |   Duplicate Functions                                                     	    |   Proposed Unified Function	|   Savings
+JSON/Image getters	    |   safe_get_json, safe_get_rest_json, safe_get_image                   	        |   safe_request(handler)    	|   ~30 lines
+Thumbnails	            |   download_thumbnail, create_image_thumbnail, parts of create_webmap_thumbnail	|   generate_thumbnail()    	|   ~80 lines
+HTML color processing	|   convert_color_style_to_class, process_html_colors_preserve_html 	            |   apply_style_class()     	|   ~40 lines
+Extent normalization	|   normalize_*, fetch_extent_*, fill_missing_*	                                    |   normalize_extent()      	|   ~50 lines
+Folder management	    |   check_folder, create_folder, move_item_to_folder, move_items_to_folder      	|   FolderManager class     	|   ~60 lines
+Step/status output	    |   repeated prints/logs	                                                        |   log_step(msg)	            |   readability + maintainability
 
 Would you like a rewritten refactored code skeleton (e.g., reorganized 1,000-foot view of module layout showing the new combined functions and order)? That would make implementing these changes easier while preserving your verbose commenting style.
