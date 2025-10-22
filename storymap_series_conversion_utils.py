@@ -72,6 +72,8 @@ def authenticate_gis(context, portal_url="https://www.arcgis.com", client_id=Non
     def finish_auth(gis):
         context["gis"] = gis
         print(f"Authenticated as: {context['gis'].properties.user.username} (role: {context['gis'].properties.user.role} / userType: {context['gis'].properties.user.userLicenseTypeId}")
+        print("\nStep #1 complete. Click the Markdown text below and then click the 'Play' button twice to proceed.")
+
 
     # Try ArcGIS Notebook profile
     if current_env == "arcgisnotebook":
@@ -104,7 +106,6 @@ def authenticate_gis(context, portal_url="https://www.arcgis.com", client_id=Non
             try:
                 gis = GIS(portal_url, username_widget.value, password_widget.value)
                 finish_auth(gis)
-                print("\nStep #1 complete. Click the Markdown text below and then click the 'Play' button twice to proceed.")
             except Exception as e:
                 print(f"Login failed: {e}")
 
